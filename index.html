@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AP HTML Drop</title>
+<style>
+  body{margin:0;font:15px system-ui,sans-serif;background:#fff;color:#111}
+  main{max-width:900px;margin:0 auto;padding:16px}
+  #drop{border:2px dashed #999;border-radius:8px;padding:48px 16px;text-align:center;cursor:pointer}
+  #drop.over{border-color:#06f;background:#f0f6ff}
+  #bar{display:none;gap:8px;align-items:center;margin:16px 0;flex-wrap:wrap}
+  #link{flex:1;min-width:200px;padding:8px;font:inherit;border:1px solid #ccc;border-radius:6px}
+  button{padding:8px 12px;font:inherit;border:1px solid #ccc;border-radius:6px;background:#f6f6f6;cursor:pointer}
+  #msg{margin:8px 0;color:#555}
+  iframe{display:none;width:100%;height:70vh;border:1px solid #ccc;border-radius:6px}
+  #tok{display:none;margin:16px 0}
+  #tok input{width:100%;box-sizing:border-box;padding:8px;font:inherit;border:1px solid #ccc;border-radius:6px;margin:6px 0}
+  small{color:#777}
+</style>
+</head>
+<body>
+<main>
+  <div id="drop">Drop an .html file here, or click to choose one</div>
+  <input id="file" type="file" accept=".html,.htm,text/html" hidden>
+  <div id="tok">
+    One-time setup: paste the team upload token (it's saved in this browser only).
+    <input id="tokin" type="password" placeholder="github_pat_...">
+    <button id="toksave">Save</button>
+  </div>
+  <div id="msg"></div>
+  <div id="bar"><input id="link" readonly><button id="copy">Copy</button><a id="open" target="_blank"><button>Open</button></a></div>
+  <iframe id="pv" sandbox="allow-scripts allow-forms allow-popups"></iframe>
+  <p><small><a href="#" id="reset">Change token</a></small></p>
+</main>
+<script>
+const OWNER='rk-eos', REPO='AP-HTML', BRANCH='main', DIR='f';
+const BASE=`https://${OWNER.toLowerCase()}.github.io/${REPO}/${DIR}/`;
+const $=id=>document.getElementById(id);
+const store={get(){try{return localStorage.getItem('aptok')}catch(e){return null}},set(v){try{localStorage.setItem('aptok',v)}catch(e){}}};
+let token=store.get(), pending=null;
+function msg(t){$('msg').textContent=t}
+function needToken(){$('tok').style.display='block';$('tokin').focus()}
+$('toksave').onclick=()=>{token=$('tokin').value.trim();if(!token)return;store.set(token);$('tok').style.display='none';if(pending)upload(pending)};
+$('reset').onclick=e=>{e.preventDefault();needToken()};
+const drop=$('drop');
+drop.onclick=()=>$('file').click();
+$('file').onchange=e=>e.target.files[0]&&handle(e.target.files[0]);
+['dragover','dragenter'].forEach(ev=>addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over')}));
+['dragleave','drop'].forEach(ev=>addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over')}));
+addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)handle(f)});
+
+function slug(name){
+  const s=name.replace(/\.html?$/i,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'page';
+  return `${s}-${Math.random().toString(36).slice(2,6)}.html`;
+}
+function b64(text){
+  const bytes=new TextEncoder().encode(text);let bin='';
+  for(let i=0;i<bytes.length;i+=0x8000)bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  return btoa(bin);
+}
+async function handle(file){
+  const text=await file.text();
+  $('pv').srcdoc=text;$('pv').style.display='block';
+  pending={name:slug(file.name),text};
+  if(!token){msg('Preview shown. Add the token to publish.');return needToken()}
+  upload(pending);
+}
+async function upload(p){
+  msg('Publishing…');
+  const r=await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/contents/${DIR}/${p.name}`,{
+    method:'PUT',
+    headers:{Authorization:`Bearer ${token}`,Accept:'application/vnd.github+json'},
+    body:JSON.stringify({message:`Add ${p.name}`,content:b64(p.text),branch:BRANCH})
+  });
+  if(r.status===401||r.status===403||r.status===404){msg('Token rejected. Paste a valid one.');return needToken()}
+  if(!r.ok){msg('Upload failed: '+r.status+' '+(await r.text()).slice(0,200));return}
+  pending=null;
+  const url=BASE+p.name;
+  $('link').value=url;$('open').href=url;$('bar').style.display='flex';
+  copy(url);
+  msg('Link copied. It goes live in about a minute (GitHub Pages is deploying)…');
+  waitLive(url);
+}
+function copy(url){
+  navigator.clipboard.writeText(url).then(()=>{$('copy').textContent='Copied ✓';setTimeout(()=>$('copy').textContent='Copy',1500)},()=>{$('link').select()});
+}
+$('copy').onclick=()=>copy($('link').value);
+async function waitLive(url){
+  for(let i=0;i<60;i++){
+    await new Promise(r=>setTimeout(r,5000));
+    try{const r=await fetch(url,{method:'HEAD',cache:'no-store'});if(r.ok){msg('Live ✓ Link copied to clipboard.');return}}catch(e){}
+  }
+  msg('Still deploying. The link will work shortly.');
+}
+</script>
+</body>
+</html>
